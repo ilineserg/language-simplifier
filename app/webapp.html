@@ -1,0 +1,208 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Language Simplifier — WebApp</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#0b0d0f; --card:#111418; --text:#e6edf3; --muted:#9aa4b2; --border:#1f242b;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#fafafa; --card:#fff; --text:#111827; --muted:#6b7280; --border:#e5e7eb; }
+  }
+
+  /* 👇 ключ к ширине: все элементы учитывают padding/border внутри width */
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{box-sizing:border-box;padding:16px}
+  .container{width:100%; max-width:none;} /* на всю ширину окна */
+
+  .header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+  .title{font-size:18px;font-weight:600}
+
+  .card{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.08);
+    width:100%;
+    overflow:hidden;            /* 👈 если что-то чуть выбивается, скрываем */
+  }
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .spacer{flex:1 1 auto}
+  .muted{color:var(--muted)}
+
+  select, button, textarea{
+    border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--text);
+    padding:8px 10px;font:inherit
+  }
+  button{cursor:pointer}
+  button:disabled{opacity:.6;cursor:not-allowed}
+
+  /* 👇 фиксы именно для текстовой области */
+  textarea{
+    display:block;
+    width:100%;
+    max-width:100%;
+    min-width:0;                    /* важно, чтобы во flex/внутри карточки не распирало */
+    min-height:160px;
+    resize:vertical;
+    -webkit-appearance:none;
+    /* на iOS/Telegram бывает полезно: */
+    width:-webkit-fill-available;
+  }
+
+  .reader{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:16px;margin-top:10px;min-height:160px;max-height:60vh;overflow:auto;word-wrap:break-word
+  }
+
+  .badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--border)}
+  .ok{color:#16a34a;border-color:#16a34a33;background:#16a34a1a}
+  .bad{color:#dc2626;border-color:#dc262633;background:#dc26261a}
+</style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="container">
+
+        <div class="header">
+          <div class="title">Language Simplifier — WebApp</div>
+          <div class="badge" id="ver">checking…</div>
+        </div>
+
+        <div class="card">
+          <div class="row">
+            <div class="muted">User: <span id="user">-</span></div>
+            <div class="spacer"></div>
+            <label for="level" class="muted">Level</label>
+            <select id="level">
+              <option value="A2" selected>A2</option>
+              <option value="B1">B1</option>
+              <option value="B2">B2</option>
+              <option value="C1">C1</option>
+              <option value="C2">C2</option>
+
+            </select>
+            <span class="muted" id="wsStatus">WS: idle</span>
+          </div>
+
+          <textarea id="input" placeholder="Вставь текст для адаптации…"></textarea>
+
+          <div class="row" style="margin-top:8px">
+            <button id="start">Start stream</button>
+            <button id="stop" disabled>Stop</button>
+            <button id="clear">Clear</button>
+          </div>
+
+          <div id="out" class="reader"></div>
+
+          <details style="margin-top:10px">
+            <summary class="muted">Init Data (short)</summary>
+            <pre id="idata" class="muted" style="white-space:pre-wrap"></pre>
+          </details>
+        </div>
+
+      </div>
+    </div>
+
+    <script>
+      const tg = window.Telegram?.WebApp;
+
+      // ---- State
+      let verified = false;
+      let ws = null;
+
+      // ---- Helpers
+      const outEl = document.getElementById('out');
+      const wsStatus = document.getElementById('wsStatus');
+      const startBtn = document.getElementById('start');
+      const stopBtn  = document.getElementById('stop');
+      const clearBtn = document.getElementById('clear');
+
+      function setWsStatus(text){ wsStatus.textContent = 'WS: ' + text; }
+      function append(text){ outEl.textContent += text; outEl.scrollTop = outEl.scrollHeight; }
+
+      async function verifyInitData() {
+        const verEl = document.getElementById('ver');
+        verEl.textContent = 'checking…'; verEl.className = 'badge';
+        const initData = tg?.initData || '';
+        const resp = await fetch('/api/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ init_data: initData })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          verEl.textContent = 'verified'; verEl.className = 'badge ok';  // ЗЕЛЁНЫЙ
+          verified = true;
+          if (data.user) {
+            document.getElementById('user').textContent = `${data.user.first_name} @${data.user.username||''}`;
+          }
+        } else {
+          verEl.textContent = 'invalid'; verEl.className = 'badge bad';  // КРАСНЫЙ
+          verified = false;
+        }
+      }
+
+      function startStream(){
+        if (!verified) { alert('Not verified'); return; }
+        if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+        const level = document.getElementById('level').value;
+        const text  = document.getElementById('input').value;
+        if (!text.trim()) { alert('Paste text first'); return; }
+
+        const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}/ws/adapt`);
+        setWsStatus('connecting…');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        ws.onopen = () => {
+          setWsStatus('connected');
+          const init = {
+            init_data: tg.initData,
+            source_type: 'text',
+            payload: text,
+            level,
+            provider: 'openai' // поменяй на 'mock' при отладке
+          };
+          ws.send(JSON.stringify(init));
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            const m = JSON.parse(ev.data);
+            if (m.type === 'token') append(m.data);
+            if (m.type === 'end')   append('\n\n— done —');
+            if (m.type === 'error') append(`\n[error] ${m.data}`);
+          } catch (e) { console.error('bad message', e); }
+        };
+
+        ws.onerror = () => { setWsStatus('error'); append('\n[ws error]'); };
+        ws.onclose = () => { setWsStatus('closed'); startBtn.disabled = false; stopBtn.disabled = true; };
+      }
+
+      function stopStream(){ if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, 'client stop'); }
+      function clearOut(){ outEl.textContent = ''; }
+
+      // ——— Init
+      if (!tg) {
+        document.body.innerHTML = '<p style="padding:16px">❌ Not inside Telegram WebApp. Open via the bot button.</p>';
+      } else {
+        tg.expand(); tg.ready();
+
+        const short = JSON.stringify({query_id: tg.initDataUnsafe?.query_id, user: tg.initDataUnsafe?.user}, null, 2);
+        document.getElementById('idata').textContent = short;
+
+        verifyInitData();
+
+        startBtn.onclick = startStream;
+        stopBtn.onclick  = stopStream;
+        clearBtn.onclick = clearOut;
+      }
+    </script>
+  </body>
+</html>

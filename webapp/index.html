@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Language Simplifier</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="/styles/index.css">
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <div class="title">Language Simplifier</div>
+        <div id="ver" class="badge">checking…</div>
+      </div>
+
+      <div class="controls">
+        <label>Level</label>
+        <select id="level">
+          <option value="B1" selected>B1</option>
+          <option value="B2">B2</option>
+          <option value="C1">C1</option>
+        </select>
+        <span id="wsStatus" class="muted">WS: idle</span>
+      </div>
+
+      <textarea id="input" placeholder="Paste the text to adapt…"></textarea>
+
+      <div class="buttons">
+        <button id="start">Start stream</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="clear">Clear</button>
+        <button id="copy">Copy output</button>
+      </div>
+
+      <div id="out" class="reader"></div>
+
+      <details class="details">
+        <summary class="muted">Init Data (short)</summary>
+        <pre id="idata" class="muted"></pre>
+      </details>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
